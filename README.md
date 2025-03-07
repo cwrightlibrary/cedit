@@ -1,5 +1,7 @@
 # ⌨️ cedit
 
+![cedit icon](cedit-icon.png)
+
 A terminal-based code editor made with `Python`.
 
 ## ⚡️ Features
@@ -13,9 +15,9 @@ A terminal-based code editor made with `Python`.
 
 ## 📝 To-Do
 
-- [] Get a simple text editor made
-- [] Add more themes and color schemes
-- [] Improve performance for large files
-- [] Enhance auto-completion features
-- [] Add support for more programming languages
-- [] Create a user-friendly configuration file
+- [ ] Get a simple text editor made
+- [ ] Add more themes and color schemes
+- [ ] Improve performance for large files
+- [ ] Enhance auto-completion features
+- [ ] Add support for more programming languages
+- [ ] Create a user-friendly configuration file
