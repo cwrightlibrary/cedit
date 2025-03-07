@@ -1,4 +1,4 @@
-# ⌨️ cedit
+# cedit
 
 ![cedit icon](cedit-icon.png)
 
