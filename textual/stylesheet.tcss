@@ -1,0 +1,4 @@
+#cedit-title {
+    background: darkblue;
+    border: heavy white;
+}
