@@ -6,7 +6,7 @@ Screen {
 
 #editor {
     height: 100%;
-    border: solid green;
+    border: solid #680024;
 }
 
 FileDialog {
@@ -33,4 +33,16 @@ FileDialog #cancel {
 
 FileDialog #ok {
     width: 100%;
+}
+
+StatusBar {
+    height: 1;
+    background: $accent;
+    color: $text;
+    layout: horizontal;
+}
+
+StatusBar > Label {
+    width: 1fr;
+    padding: 0 1;
 }
