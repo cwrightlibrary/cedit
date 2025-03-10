@@ -1,4 +1,36 @@
-#cedit-title {
-    background: darkblue;
-    border: heavy white;
+Screen {
+    layout: grid;
+    grid-size: 1 3;
+    grid-rows: 1fr 1fr 1fr;
+}
+
+#editor {
+    height: 100%;
+    border: solid green;
+}
+
+FileDialog {
+    layout: grid;
+    grid-size: 3;
+    grid-rows: auto auto;
+    padding: 1;
+    width: 60;
+    height: 7;
+    border: heavy $accent;
+    background: $surface;
+    content-align: center middle;
+}
+
+FileDialog #file_path {
+    column-span: 3;
+    width: 100%;
+    margin-bottom: 1;
+}
+
+FileDialog #cancel {
+    width: 100%;
+}
+
+FileDialog #ok {
+    width: 100%;
 }
