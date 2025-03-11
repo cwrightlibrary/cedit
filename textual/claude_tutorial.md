@@ -1,941 +1,768 @@
-# Building a Terminal-Based Text Editor with Textual in Python
+# Building a Terminal-Based Code Editor with Textual
 
-Textual is a powerful TUI (Text User Interface) framework for Python that makes it easy to create rich, interactive terminal applications. In this guide, we'll build a functional text editor with features like file opening/saving, syntax highlighting, and a basic command system.
+This guide walks through the process of creating a fully-functional terminal-based code editor using Python and the Textual library. We'll implement syntax highlighting, file operations, and split-screen editing without using buttons.
 
 ## Table of Contents
-- [Building a Terminal-Based Text Editor with Textual in Python](#building-a-terminal-based-text-editor-with-textual-in-python)
-  - [Table of Contents](#table-of-contents)
-  - [Setting Up the Environment](#setting-up-the-environment)
-  - [Creating the Basic Editor Structure](#creating-the-basic-editor-structure)
-  - [Implementing File Operations](#implementing-file-operations)
-  - [Adding Syntax Highlighting](#adding-syntax-highlighting)
-  - [Implementing Search and Replace](#implementing-search-and-replace)
-  - [Adding a Command Palette](#adding-a-command-palette)
-  - [Final Touches and Enhancements](#final-touches-and-enhancements)
-  - [Full Working Example](#full-working-example)
-- [textual\_editor.py](#textual_editorpy)
 
-## Setting Up the Environment
+1. [Setup and Requirements](#setup-and-requirements)
+2. [Core Architecture](#core-architecture)
+3. [Building the Editor Widget](#building-the-editor-widget)
+4. [Implementing File Operations](#implementing-file-operations)
+5. [Creating Split Views](#creating-split-views)
+6. [Keyboard Shortcuts](#keyboard-shortcuts)
+7. [Putting It All Together](#putting-it-all-together)
+8. [Running the Application](#running-the-application)
 
-First, let's set up our development environment:
+## Setup and Requirements
+
+Before we begin, ensure you have the necessary packages installed:
 
 ```bash
-# Create a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install Textual
-pip install textual
+pip install textual rich
 ```
 
-## Creating the Basic Editor Structure
+These packages provide the foundation for our application:
+- **Textual**: A framework for creating rich terminal user interfaces (TUIs)
+- **Rich**: A library for rich text and beautiful formatting in the terminal
 
-Let's start by creating a basic text editor with a simple interface:
+## Core Architecture
+
+Our application consists of four main components:
+
+1. **Editor Widget**: Handles text editing, cursor movement, and syntax highlighting
+2. **File Dialog**: Provides screens for opening and saving files
+3. **Editor Container**: Manages editors and file operations
+4. **Main Application**: Coordinates all components and handles keyboard shortcuts
+
+Let's implement each component step by step.
+
+## Building the Editor Widget
+
+The `Editor` class is the foundation of our application. It needs to:
+- Display text with syntax highlighting
+- Handle cursor movement
+- Process keyboard input
+- Provide text editing capabilities
+
+### Step 1: Create the basic Editor class
 
 ```python
-# editor.py
+from rich.syntax import Syntax
+from rich.text import Text
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, TextArea
-from textual.binding import Binding
+from textual.widgets import Static
+from textual import events
 
-class TextEditor(App):
-    """A Textual text editor application."""
-    
-    CSS = """
-    Screen {
-        layout: grid;
-        grid-size: 1 3;
-        grid-rows: 1fr 1fr 1fr;
+class Editor(Static):
+    """A code editor widget with syntax highlighting."""
+
+    COMPONENT_CLASSES = {"editor", "editor--cursor"}
+    DEFAULT_CSS = """
+    Editor {
+        background: $surface;
+        color: $text;
+        height: 1fr;
     }
-    
-    #editor {
-        height: 100%;
-        border: solid green;
+    .editor--cursor {
+        background: $accent;
+        color: $text;
+        text-style: reverse;
     }
     """
-    
-    BINDINGS = [
-        Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+s", "save", "Save"),
-        Binding("ctrl+o", "open_file", "Open"),
-    ]
-    
-    def __init__(self):
-        super().__init__()
-        self.current_file = None
-    
-    def compose(self) -> ComposeResult:
-        """Compose the UI."""
-        yield Header(show_clock=True)
-        yield TextArea(id="editor")
-        yield Footer()
-    
-    def action_quit(self) -> None:
-        """Quit the application."""
-        self.exit()
-    
-    def action_save(self) -> None:
-        """Save the current file."""
-        # We'll implement this later
-        self.notify("Save not implemented yet")
-    
-    def action_open_file(self) -> None:
-        """Open a file."""
-        # We'll implement this later
-        self.notify("Open not implemented yet")
 
-if __name__ == "__main__":
-    app = TextEditor()
-    app.run()
+    def __init__(
+        self,
+        text: str = "",
+        language: str = "python",
+        tab_size: int = 4,
+        path: Optional[str] = None,
+        name: Optional[str] = None,
+        id: Optional[str] = None,
+        classes: Optional[str] = None,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes)
+        self.text_content = text
+        self.language = language
+        self.tab_size = tab_size
+        self.cursor_row = 0
+        self.cursor_col = 0
+        self.path = path
+        self.lines = text.splitlines() or [""]
+        self.is_modified = False
+        
+    def compose(self) -> ComposeResult:
+        yield Static(id="editor-content")
+    
+    def on_mount(self) -> None:
+        self.update_syntax()
 ```
 
-This code creates a basic text editor with a full-screen text area and key bindings for quit, save, and open operations.
+This sets up the basic structure of our editor. Now, let's add the functionality for syntax highlighting.
+
+### Step 2: Implement syntax highlighting
+
+```python
+def update_syntax(self) -> None:
+    content = self.query_one("#editor-content", Static)
+    
+    # Check if path exists to determine language based on file extension
+    if self.path and os.path.exists(self.path):
+        extension = pathlib.Path(self.path).suffix.lstrip(".")
+        if extension:
+            self.language = extension
+    
+    # Join lines back to text for syntax highlighting
+    text = "\n".join(self.lines)
+    
+    # Apply syntax highlighting
+    syntax = Syntax(
+        text,
+        self.language,
+        theme="monokai",
+        line_numbers=True,
+        word_wrap=False,
+        tab_size=self.tab_size,
+    )
+    
+    # Update content
+    content.update(syntax)
+    
+    # Update app title with modified indicator
+    app = self.app
+    if isinstance(app, CodeEditorApp):
+        modified_indicator = "*" if self.is_modified else ""
+        path_display = self.path if self.path else "Untitled"
+        app.sub_title = f"{path_display}{modified_indicator}"
+```
+
+The `update_syntax()` method refreshes the editor content with syntax highlighting, detects the language based on file extension, and updates the application title to indicate when files have unsaved changes.
+
+### Step 3: Implement text editing operations
+
+Now, let's add methods for inserting and deleting text:
+
+```python
+def insert_text(self, text: str) -> None:
+    current_line = self.lines[self.cursor_row]
+    
+    # Handle special case for tabs
+    if text == "\t":
+        text = " " * self.tab_size
+    
+    # Insert text at cursor position
+    new_line = current_line[:self.cursor_col] + text + current_line[self.cursor_col:]
+    self.lines[self.cursor_row] = new_line
+    self.cursor_col += len(text)
+    
+    self.is_modified = True
+    self.update_syntax()
+
+def delete_character(self) -> None:
+    if self.cursor_col > 0:
+        # Delete character before cursor
+        current_line = self.lines[self.cursor_row]
+        new_line = current_line[:self.cursor_col - 1] + current_line[self.cursor_col:]
+        self.lines[self.cursor_row] = new_line
+        self.cursor_col -= 1
+        self.is_modified = True
+    elif self.cursor_row > 0:
+        # If at beginning of line, join with previous line
+        current_line = self.lines.pop(self.cursor_row)
+        self.cursor_row -= 1
+        self.cursor_col = len(self.lines[self.cursor_row])
+        self.lines[self.cursor_row] += current_line
+        self.is_modified = True
+    
+    self.update_syntax()
+
+def handle_enter(self) -> None:
+    current_line = self.lines[self.cursor_row]
+    
+    # Calculate indentation of current line
+    indent = len(current_line) - len(current_line.lstrip())
+    indentation = " " * indent
+    
+    # Split line at cursor position
+    before_cursor = current_line[:self.cursor_col]
+    after_cursor = current_line[self.cursor_col:]
+    
+    # Update current line and insert new line
+    self.lines[self.cursor_row] = before_cursor
+    self.lines.insert(self.cursor_row + 1, indentation + after_cursor)
+    
+    # Move cursor to new line
+    self.cursor_row += 1
+    self.cursor_col = len(indentation)
+    
+    self.is_modified = True
+    self.update_syntax()
+```
+
+These methods handle:
+- Inserting text, including proper tab handling
+- Deleting characters with backspace
+- Handling the Enter key, with automatic indentation preservation
+
+### Step 4: Implement cursor movement
+
+```python
+def move_cursor(self, rows: int = 0, cols: int = 0) -> None:
+    # Update row position
+    new_row = max(0, min(len(self.lines) - 1, self.cursor_row + rows))
+    
+    # If row changed, adjust column to fit within new line
+    if new_row != self.cursor_row:
+        self.cursor_row = new_row
+        self.cursor_col = min(self.cursor_col, len(self.lines[self.cursor_row]))
+    
+    # Update column position
+    self.cursor_col = max(0, min(len(self.lines[self.cursor_row]), self.cursor_col + cols))
+    
+    self.update_syntax()
+```
+
+This method handles cursor movement, ensuring it stays within valid bounds of the text.
+
+### Step 5: Handle keyboard events
+
+Finally, we need to process keyboard events:
+
+```python
+def on_key(self, event: events.Key) -> None:
+    if event.key == "escape":
+        self.screen.focus_next()
+        return
+    
+    # Handle cursor movement
+    if event.key == "up":
+        self.move_cursor(rows=-1)
+    elif event.key == "down":
+        self.move_cursor(rows=1)
+    elif event.key == "left":
+        self.move_cursor(cols=-1)
+    elif event.key == "right":
+        self.move_cursor(cols=1)
+    elif event.key == "home":
+        self.cursor_col = 0
+        self.update_syntax()
+    elif event.key == "end":
+        self.cursor_col = len(self.lines[self.cursor_row])
+        self.update_syntax()
+    
+    # Handle editing
+    elif event.key == "enter":
+        self.handle_enter()
+    elif event.key == "backspace":
+        self.delete_character()
+    elif event.key == "delete":
+        # Simulate delete by moving cursor right then backspace
+        if self.cursor_col < len(self.lines[self.cursor_row]):
+            self.move_cursor(cols=1)
+            self.delete_character()
+    
+    # Handle character insertion
+    elif len(event.key) == 1 or event.key == "tab":
+        self.insert_text(event.key)
+```
+
+This method processes all keyboard events, directing them to the appropriate handlers for cursor movement, text editing, and character insertion.
 
 ## Implementing File Operations
 
-Now, let's implement file operations using Textual's `Input` widget for file paths:
+Now let's implement file operations through a dialog system.
+
+### Step 1: Create a File Dialog Screen
 
 ```python
-# editor.py (updated)
-from textual.app import App, ComposeResult
-from textual.containers import Container
-from textual.widgets import Header, Footer, TextArea, Input, Button
-from textual.binding import Binding
-from pathlib import Path
-
-class FileDialog(Container):
-    """A simple file dialog."""
+class FileDialog(Screen):
+    """A dialog screen for opening or saving files."""
     
-    def __init__(self, action="open"):
-        super().__init__()
-        self.action = action
-    
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        yield Input(placeholder="Enter file path...", id="file_path")
-        yield Button("Cancel", variant="error", id="cancel")
-        yield Button("OK", variant="success", id="ok")
-
-class TextEditor(App):
-    """A Textual text editor application."""
-    
-    CSS = """
-    Screen {
-        layout: grid;
-        grid-size: 1 3;
-        grid-rows: auto 1fr auto;
-    }
-    
-    #editor {
-        height: 100%;
-        border: solid green;
-    }
-    
+    DEFAULT_CSS = """
     FileDialog {
-        layout: grid;
-        grid-size: 3;
-        grid-rows: auto auto;
-        padding: 1;
-        width: 60;
-        height: 7;
-        border: heavy $accent;
+        align: center middle;
         background: $surface;
-        content-align: center middle;
-    }
-    
-    FileDialog #file_path {
-        column-span: 3;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    
-    FileDialog #cancel {
-        width: 100%;
-    }
-    
-    FileDialog #ok {
-        width: 100%;
-    }
-    """
-    
-    BINDINGS = [
-        Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+s", "save", "Save"),
-        Binding("ctrl+o", "open_file", "Open"),
-    ]
-    
-    def __init__(self):
-        super().__init__()
-        self.current_file = None
-    
-    def compose(self) -> ComposeResult:
-        """Compose the UI."""
-        yield Header(show_clock=True)
-        yield TextArea(id="editor")
-        yield Footer()
-    
-    def action_quit(self) -> None:
-        """Quit the application."""
-        self.exit()
-    
-    def action_save(self) -> None:
-        """Save the current file."""
-        if self.current_file:
-            self._save_file(self.current_file)
-        else:
-            # Show save dialog
-            self.mount(FileDialog(action="save"))
-    
-    def action_open_file(self) -> None:
-        """Open a file."""
-        self.mount(FileDialog(action="open"))
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses in the file dialog."""
-        button_id = event.button.id
-        if button_id == "cancel":
-            # Remove the dialog
-            self.query_one(FileDialog).remove()
-        elif button_id == "ok":
-            # Get the file path
-            file_path = self.query_one("#file_path").value
-            dialog = self.query_one(FileDialog)
-            
-            if dialog.action == "open":
-                self._open_file(file_path)
-            else:  # save
-                self._save_file(file_path)
-            
-            # Remove the dialog
-            dialog.remove()
-    
-    def _open_file(self, file_path):
-        """Open a file and load its contents."""
-        try:
-            path = Path(file_path)
-            if path.exists():
-                self.current_file = file_path
-                with open(file_path, "r") as f:
-                    content = f.read()
-                
-                editor = self.query_one("#editor", TextArea)
-                editor.text = content
-                self.notify(f"Opened: {file_path}")
-            else:
-                self.notify(f"File not found: {file_path}", severity="error")
-        except Exception as e:
-            self.notify(f"Error opening file: {e}", severity="error")
-    
-    def _save_file(self, file_path):
-        """Save the current content to a file."""
-        try:
-            editor = self.query_one("#editor", TextArea)
-            content = editor.text
-            
-            with open(file_path, "w") as f:
-                f.write(content)
-            
-            self.current_file = file_path
-            self.notify(f"Saved: {file_path}")
-        except Exception as e:
-            self.notify(f"Error saving file: {e}", severity="error")
-
-if __name__ == "__main__":
-    app = TextEditor()
-    app.run()
-```
-
-## Adding Syntax Highlighting
-
-Now let's add syntax highlighting using Textual's rich-text capabilities:
-
-```python
-# editor.py (updated with syntax highlighting)
-import re
-from textual.app import App, ComposeResult
-from textual.containers import Container
-from textual.widgets import Header, Footer, TextArea, Input, Button, Label
-from textual.binding import Binding
-from pathlib import Path
-from rich.syntax import Syntax
-from rich.text import Text
-
-class FileDialog(Container):
-    """A simple file dialog."""
-    
-    def __init__(self, action="open"):
-        super().__init__()
-        self.action = action
-    
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        yield Input(placeholder="Enter file path...", id="file_path")
-        yield Button("Cancel", variant="error", id="cancel")
-        yield Button("OK", variant="success", id="ok")
-
-class SyntaxHighlightedTextArea(TextArea):
-    """A text area with syntax highlighting."""
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.language = "python"  # Default language
-    
-    def set_language(self, language):
-        """Set the language for syntax highlighting."""
-        self.language = language
-        self.highlight_syntax()
-    
-    def highlight_syntax(self):
-        """Apply syntax highlighting to the content."""
-        if not self.text:
-            return
-            
-        try:
-            syntax = Syntax(
-                self.text,
-                self.language,
-                theme="monokai",
-                word_wrap=True,
-                indent_guides=True,
-                line_numbers=True,
-                highlight_lines=set(),
-            )
-            
-            # This would be the ideal approach, but currently TextArea doesn't 
-            # support direct styling like this. This is a placeholder for future enhancement.
-            # self.update_content(syntax)
-            
-            # Instead, we'll just notify for now
-            self.app.notify(f"Syntax highlighting applied for {self.language}")
-        except Exception as e:
-            self.app.notify(f"Error highlighting syntax: {e}", severity="error")
-    
-    def on_text_changed(self, event):
-        """Handle text changes to update highlighting."""
-        # In a real implementation, this would update the highlighting
-        # For now, we'll do nothing to avoid performance issues
-        pass
-
-class StatusBar(Container):
-    """Status bar for the editor."""
-    
-    def compose(self) -> ComposeResult:
-        """Compose the status bar."""
-        yield Label("Line: 1, Col: 1", id="position")
-        yield Label("Python", id="language")
-        yield Label("UTF-8", id="encoding")
-
-class TextEditor(App):
-    """A Textual text editor application."""
-    
-    CSS = """
-    Screen {
-        layout: grid;
-        grid-size: 1 3;
-        grid-rows: auto 1fr auto;
-    }
-    
-    #editor {
-        height: 100%;
-        border: solid green;
-    }
-    
-    FileDialog {
-        layout: grid;
-        grid-size: 3;
-        grid-rows: auto auto;
-        padding: 1;
-        width: 60;
-        height: 7;
-        border: heavy $accent;
-        background: $surface;
-        content-align: center middle;
-    }
-    
-    FileDialog #file_path {
-        column-span: 3;
-        width: 100%;
-        margin-bottom: 1;
-    }
-    
-    FileDialog #cancel {
-        width: 100%;
-    }
-    
-    FileDialog #ok {
-        width: 100%;
-    }
-    
-    StatusBar {
-        height: 1;
-        background: $accent;
         color: $text;
-        layout: horizontal;
     }
     
-    StatusBar > Label {
-        width: 1fr;
-        padding: 0 1;
-    }
-    """
-    
-    BINDINGS = [
-        Binding("ctrl+q", "quit", "Quit"),
-        Binding("ctrl+s", "save", "Save"),
-        Binding("ctrl+o", "open_file", "Open"),
-        Binding("ctrl+h", "toggle_highlighting", "Toggle Highlighting"),
-        Binding("ctrl+f", "search", "Search"),
-    ]
-    
-    def __init__(self):
-        super().__init__()
-        self.current_file = None
-        self.highlighting_enabled = True
-    
-    def compose(self) -> ComposeResult:
-        """Compose the UI."""
-        yield Header(show_clock=True)
-        yield SyntaxHighlightedTextArea(id="editor")
-        yield StatusBar()
-        yield Footer()
-    
-    def on_mount(self) -> None:
-        """Handle application mount event."""
-        self.update_status_bar()
-    
-    def update_status_bar(self) -> None:
-        """Update the status bar information."""
-        editor = self.query_one("#editor", SyntaxHighlightedTextArea)
-        cursor = editor.cursor_location
-        line = cursor[0] + 1
-        col = cursor[1] + 1
-        
-        # Update position
-        position_label = self.query_one("#position", Label)
-        position_label.update(f"Line: {line}, Col: {col}")
-        
-        # Update language based on file extension
-        if self.current_file:
-            extension = Path(self.current_file).suffix.lstrip('.')
-            language_map = {
-                'py': 'Python',
-                'js': 'JavaScript',
-                'html': 'HTML',
-                'css': 'CSS',
-                'md': 'Markdown',
-                'txt': 'Plain Text',
-            }
-            language = language_map.get(extension, 'Plain Text')
-            language_label = self.query_one("#language", Label)
-            language_label.update(language)
-            
-            # Set the language for syntax highlighting
-            editor.set_language(language.lower())
-    
-    def action_quit(self) -> None:
-        """Quit the application."""
-        self.exit()
-    
-    def action_save(self) -> None:
-        """Save the current file."""
-        if self.current_file:
-            self._save_file(self.current_file)
-        else:
-            # Show save dialog
-            self.mount(FileDialog(action="save"))
-    
-    def action_open_file(self) -> None:
-        """Open a file."""
-        self.mount(FileDialog(action="open"))
-    
-    def action_toggle_highlighting(self) -> None:
-        """Toggle syntax highlighting."""
-        self.highlighting_enabled = not self.highlighting_enabled
-        editor = self.query_one("#editor", SyntaxHighlightedTextArea)
-        
-        if self.highlighting_enabled:
-            editor.highlight_syntax()
-            self.notify("Syntax highlighting enabled")
-        else:
-            self.notify("Syntax highlighting disabled")
-    
-    def action_search(self) -> None:
-        """Search in the current file."""
-        self.notify("Search not implemented yet")
-    
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button presses in the file dialog."""
-        button_id = event.button.id
-        if button_id == "cancel":
-            # Remove the dialog
-            self.query_one(FileDialog).remove()
-        elif button_id == "ok":
-            # Get the file path
-            file_path = self.query_one("#file_path").value
-            dialog = self.query_one(FileDialog)
-            
-            if dialog.action == "open":
-                self._open_file(file_path)
-            else:  # save
-                self._save_file(file_path)
-            
-            # Remove the dialog
-            dialog.remove()
-    
-    def _open_file(self, file_path):
-        """Open a file and load its contents."""
-        try:
-            path = Path(file_path)
-            if path.exists():
-                self.current_file = file_path
-                with open(file_path, "r") as f:
-                    content = f.read()
-                
-                editor = self.query_one("#editor", SyntaxHighlightedTextArea)
-                editor.text = content
-                
-                # Update status bar and apply syntax highlighting
-                self.update_status_bar()
-                if self.highlighting_enabled:
-                    editor.highlight_syntax()
-                
-                self.notify(f"Opened: {file_path}")
-            else:
-                self.notify(f"File not found: {file_path}", severity="error")
-        except Exception as e:
-            self.notify(f"Error opening file: {e}", severity="error")
-    
-    def _save_file(self, file_path):
-        """Save the current content to a file."""
-        try:
-            editor = self.query_one("#editor", SyntaxHighlightedTextArea)
-            content = editor.text
-            
-            with open(file_path, "w") as f:
-                f.write(content)
-            
-            self.current_file = file_path
-            self.update_status_bar()
-            self.notify(f"Saved: {file_path}")
-        except Exception as e:
-            self.notify(f"Error saving file: {e}", severity="error")
-
-if __name__ == "__main__":
-    app = TextEditor()
-    app.run()
-```
-
-## Implementing Search and Replace
-
-Let's implement search and replace functionality:
-
-```python
-# Adding search and replace to our editor
-from textual.widgets import Input, Button
-from textual.containers import Horizontal, Vertical
-
-class SearchDialog(Vertical):
-    """Search and replace dialog."""
-    
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        yield Input(placeholder="Search term...", id="search_term")
-        yield Input(placeholder="Replace with... (optional)", id="replace_term")
-        yield Horizontal(
-            Button("Previous", id="prev"),
-            Button("Next", id="next"),
-            Button("Replace", id="replace"),
-            Button("Replace All", id="replace_all"),
-            Button("Close", id="close")
-        )
-
-# Add this to the TextEditor class
-def action_search(self) -> None:
-    """Show search dialog."""
-    self.mount(SearchDialog())
-
-def on_button_pressed(self, event: Button.Pressed) -> None:
-    """Handle button presses in dialogs."""
-    button_id = event.button.id
-    
-    # Handle file dialog buttons
-    if self.query("FileDialog").first():
-        # File dialog handling code (as already implemented)
-        pass
-    
-    # Handle search dialog buttons
-    elif self.query("SearchDialog").first():
-        search_dialog = self.query_one(SearchDialog)
-        
-        if button_id == "close":
-            search_dialog.remove()
-        else:
-            editor = self.query_one("#editor", TextArea)
-            search_term = self.query_one("#search_term").value
-            replace_term = self.query_one("#replace_term").value
-            
-            if not search_term:
-                self.notify("Please enter a search term", severity="warning")
-                return
-            
-            if button_id == "next":
-                self._search_next(search_term)
-            elif button_id == "prev":
-                self._search_prev(search_term)
-            elif button_id == "replace" and replace_term:
-                self._replace_current(search_term, replace_term)
-            elif button_id == "replace_all" and replace_term:
-                self._replace_all(search_term, replace_term)
-
-def _search_next(self, term):
-    """Search for the next occurrence of term."""
-    editor = self.query_one("#editor", TextArea)
-    text = editor.text
-    cursor_pos = editor.cursor_location
-    
-    # Convert row, column to single index position
-    lines = text.split("\n")
-    current_pos = sum(len(line) + 1 for line in lines[:cursor_pos[0]]) + cursor_pos[1]
-    
-    # Search from current position
-    search_pos = text.find(term, current_pos + 1)
-    
-    if search_pos == -1:  # Not found, wrap around
-        search_pos = text.find(term)
-    
-    if search_pos != -1:  # Found
-        self._set_cursor_to_position(search_pos)
-        self.notify(f"Found '{term}'")
-    else:
-        self.notify(f"'{term}' not found", severity="warning")
-
-def _search_prev(self, term):
-    """Search for the previous occurrence of term."""
-    editor = self.query_one("#editor", TextArea)
-    text = editor.text
-    cursor_pos = editor.cursor_location
-    
-    # Convert row, column to single index position
-    lines = text.split("\n")
-    current_pos = sum(len(line) + 1 for line in lines[:cursor_pos[0]]) + cursor_pos[1]
-    
-    # Search before current position
-    search_pos = text.rfind(term, 0, current_pos)
-    
-    if search_pos == -1:  # Not found, wrap around
-        search_pos = text.rfind(term)
-    
-    if search_pos != -1:  # Found
-        self._set_cursor_to_position(search_pos)
-        self.notify(f"Found '{term}'")
-    else:
-        self.notify(f"'{term}' not found", severity="warning")
-
-def _replace_current(self, search_term, replace_term):
-    """Replace the current occurrence of search_term with replace_term."""
-    editor = self.query_one("#editor", TextArea)
-    text = editor.text
-    cursor_pos = editor.cursor_location
-    
-    # Convert row, column to single index position
-    lines = text.split("\n")
-    current_pos = sum(len(line) + 1 for line in lines[:cursor_pos[0]]) + cursor_pos[1]
-    
-    # Check if cursor is at a match
-    if text[current_pos:current_pos + len(search_term)] == search_term:
-        # Replace at cursor position
-        new_text = text[:current_pos] + replace_term + text[current_pos + len(search_term):]
-        editor.text = new_text
-        self.notify(f"Replaced occurrence of '{search_term}'")
-        return True
-    
-    # If cursor is not at a match, search for the next one
-    search_pos = text.find(search_term, current_pos)
-    if search_pos == -1:  # Not found after cursor, try from beginning
-        search_pos = text.find(search_term)
-    
-    if search_pos != -1:  # Found
-        self._set_cursor_to_position(search_pos)
-        self.notify(f"Found '{search_term}'")
-        return True
-    else:
-        self.notify(f"'{search_term}' not found", severity="warning")
-        return False
-
-def _replace_all(self, search_term, replace_term):
-    """Replace all occurrences of search_term with replace_term."""
-    editor = self.query_one("#editor", TextArea)
-    text = editor.text
-    
-    new_text = text.replace(search_term, replace_term)
-    count = text.count(search_term)
-    
-    if count > 0:
-        editor.text = new_text
-        self.notify(f"Replaced {count} occurrences of '{search_term}'")
-    else:
-        self.notify(f"'{search_term}' not found", severity="warning")
-
-def _set_cursor_to_position(self, position):
-    """Set the cursor to a specific position in the text."""
-    editor = self.query_one("#editor", TextArea)
-    text = editor.text
-    
-    # Convert linear position to row, column
-    lines = text.split("\n")
-    row = 0
-    pos = 0
-    
-    for line in lines:
-        line_length = len(line) + 1  # +1 for the newline
-        if pos + line_length > position:
-            col = position - pos
-            editor.move_cursor(row, col)
-            return
-        pos += line_length
-        row += 1
-    
-    # If we get here, the position is at the end
-    last_row = len(lines) - 1
-    last_col = len(lines[-1])
-    editor.move_cursor(last_row, last_col)
-```
-
-## Adding a Command Palette
-
-Let's implement a command palette for quick access to functions:
-
-```python
-class CommandPalette(Container):
-    """Command palette for quick access to editor functions."""
-    
-    COMMANDS = [
-        ("Save", "save"),
-        ("Open", "open_file"),
-        ("Search", "search"),
-        ("Toggle Highlighting", "toggle_highlighting"),
-        ("Quit", "quit"),
-    ]
-    
-    def compose(self) -> ComposeResult:
-        """Compose the command palette."""
-        yield Input(placeholder="Type a command...", id="command_input")
-        for name, _ in self.COMMANDS:
-            yield Button(name, id=f"cmd_{name.lower().replace(' ', '_')}")
-
-# Add to the TextEditor class
-def action_show_command_palette(self) -> None:
-    """Show the command palette."""
-    self.mount(CommandPalette())
-
-# Add binding
-BINDINGS = [
-    # ... existing bindings
-    Binding("ctrl+p", "show_command_palette", "Command Palette"),
-]
-
-# Update button handling
-def on_button_pressed(self, event: Button.Pressed) -> None:
-    """Handle button presses in dialogs."""
-    button_id = event.button.id
-    
-    # Handle command palette buttons
-    if button_id.startswith("cmd_"):
-        command = button_id[4:]  # Remove 'cmd_' prefix
-        
-        # Map command back to action
-        command_map = {
-            "save": self.action_save,
-            "open_file": self.action_open_file,
-            "search": self.action_search,
-            "toggle_highlighting": self.action_toggle_highlighting,
-            "quit": self.action_quit,
-        }
-        
-        if command in command_map:
-            # Remove the command palette
-            self.query_one(CommandPalette).remove()
-            # Execute the command
-            command_map[command]()
-    
-    # ... existing button handling code
-```
-
-## Final Touches and Enhancements
-
-Let's add a few more features to make our editor more useful:
-
-```python
-# Add line numbering and content highlighting
-class CodeEditor(SyntaxHighlightedTextArea):
-    """Extended text area with additional code editor features."""
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.show_line_numbers = True
-        self.indent_size = 4
-    
-    def on_key(self, event) -> None:
-        """Handle key presses for smart indentation and other features."""
-        if event.key == "tab":
-            # Insert spaces instead of tab
-            editor = self.query_one("#editor", TextArea)
-            cursor = editor.cursor_location
-            editor.insert(" " * self.indent_size)
-            event.prevent_default()
-        
-        # Implement auto-indentation for new lines
-        elif event.key == "enter":
-            editor = self.query_one("#editor", TextArea)
-            cursor = editor.cursor_location
-            current_line = editor.text.split("\n")[cursor[0]]
-            
-            # Count leading whitespace
-            indent_match = re.match(r"^(\s*)", current_line)
-            if indent_match:
-                indent = indent_match.group(1)
-                
-                # Check if line ends with a colon (e.g., in Python)
-                if current_line.rstrip().endswith(":"):
-                    indent += " " * self.indent_size
-            
-            # Let the default handler add the newline
-            super().on_key(event)
-            
-            # Then add the indentation
-            editor.insert(indent)
-            event.prevent_default()
-```
-
-## Full Working Example
-
-Here's the complete implementation of our text editor with all the features combined:
-
-```python
-# textual_editor.py
-from textual.app import App, ComposeResult
-from textual.containers import Container, Vertical, Horizontal
-from textual.widgets import Header, Footer, TextArea, Input, Button, Label
-from textual.binding import Binding
-from pathlib import Path
-import re
-
-class FileDialog(Container):
-    """A simple file dialog."""
-    
-    def __init__(self, action="open"):
-        super().__init__()
-        self.action = action
-    
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        yield Input(placeholder="Enter file path...", id="file_path")
-        yield Button("Cancel", variant="error", id="cancel")
-        yield Button("OK", variant="success", id="ok")
-
-class SearchDialog(Vertical):
-    """Search and replace dialog."""
-    
-    def compose(self) -> ComposeResult:
-        """Compose the dialog."""
-        yield Input(placeholder="Search term...", id="search_term")
-        yield Input(placeholder="Replace with... (optional)", id="replace_term")
-        yield Horizontal(
-            Button("Previous", id="prev"),
-            Button("Next", id="next"),
-            Button("Replace", id="replace"),
-            Button("Replace All", id="replace_all"),
-            Button("Close", id="close")
-        )
-
-class CommandPalette(Container):
-    """Command palette for quick access to editor functions."""
-    
-    COMMANDS = [
-        ("Save", "save"),
-        ("Open", "open_file"),
-        ("Search", "search"),
-        ("Toggle Highlighting", "toggle_highlighting"),
-        ("Quit", "quit"),
-    ]
-    
-    def compose(self) -> ComposeResult:
-        """Compose the command palette."""
-        yield Input(placeholder="Type a command...", id="command_input")
-        for name, action in self.COMMANDS:
-            yield Button(name, id=f"cmd_{action}")
-
-class StatusBar(Container):
-    """Status bar for the editor."""
-    
-    def compose(self) -> ComposeResult:
-        """Compose the status bar."""
-        yield Label("Line: 1, Col: 1", id="position")
-        yield Label("Python", id="language")
-        yield Label("UTF-8", id="encoding")
-
-class CodeEditor(TextArea):
-    """Extended text area with additional code editor features."""
-    
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.language = "python"  # Default language
-        self.show_line_numbers = True
-        self.indent_size = 4
-    
-    def set_language(self, language):
-        """Set the language for syntax highlighting."""
-        self.language = language
-        self.highlight_syntax()
-    
-    def highlight_syntax(self):
-        """Apply syntax highlighting to the content."""
-        # In a real implementation, this would apply rich text styling
-        # For now, we'll just notify
-        if not self.text:
-            return
-        self.app.notify(f"Syntax highlighting applied for {self.language}")
-    
-    def handle_indent(self, event):
-        """Handle smart indentation."""
-        if event.key == "tab":
-            # Insert spaces instead of tab
-            self.insert(" " * self.indent_size)
-            event.prevent_default()
-            return True
-        return False
-
-class TextEditorApp(App):
-    """A Textual text editor application."""
-    
-    CSS = """
-    Screen {
-        layout: grid;
-        grid-size: 1;
-        grid-rows: auto 1fr auto auto;
-    }
-    
-    #editor {
-        height: 100%;
-        border: solid green;
-    }
-    
-    FileDialog, SearchDialog, CommandPalette {
-        layout: grid;
-        grid-size: 3;
-        grid-rows: auto auto;
-        padding: 1;
-        width: 60;
+    #dialog-container {
+        width: 60%;
         height: auto;
         border: heavy $accent;
         background: $surface;
-        content-align: center middle;
+        padding: 1 2;
     }
     
-    FileDialog #file_path, SearchDialog #search_term, SearchDialog #replace_term, CommandPalette #command_input {
-        column-span: 3;
+    #dialog-title {
+        content-align: center middle;
+        width: 100%;
+        padding-bottom: 1;
+    }
+    
+    #file-path {
         width: 100%;
         margin-bottom: 1;
     }
+    """
     
-    FileDialog
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "confirm", "Confirm"),
+    ]
+    
+    def __init__(self, title: str, default_path: str = "", action: str = "open"):
+        super().__init__()
+        self.title = title
+        self.default_path = default_path
+        self.action = action  # "open" or "save"
+    
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog-container"):
+            yield Static(self.title, id="dialog-title")
+            yield Input(value=self.default_path, placeholder="Enter file path...", id="file-path")
+    
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+    
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+    
+    def action_confirm(self) -> None:
+        file_path = self.query_one("#file-path").value
+        self.dismiss(file_path)
+```
+
+This creates a simple dialog screen for entering file paths, which we'll use for both opening and saving files.
+
+### Step 2: Create an Editor Container for File Operations
+
+```python
+class EditorContainer(Container):
+    """A container that holds an editor and manages file operations."""
+    
+    def __init__(
+        self,
+        text: str = "",
+        language: str = "python",
+        path: Optional[str] = None,
+        name: Optional[str] = None,
+        id: Optional[str] = None,
+        classes: Optional[str] = None,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes)
+        self.text = text
+        self.language = language
+        self.path = path
+    
+    def compose(self) -> ComposeResult:
+        yield Editor(self.text, self.language, path=self.path)
+    
+    def on_mount(self) -> None:
+        self.editor = self.query_one(Editor)
+    
+    async def load_file(self, path: str) -> None:
+        """Load file content into the editor."""
+        try:
+            with open(path, "r") as f:
+                content = f.read()
+            
+            self.editor.text_content = content
+            self.editor.lines = content.splitlines() or [""]
+            self.editor.path = path
+            self.editor.cursor_row = 0
+            self.editor.cursor_col = 0
+            self.editor.is_modified = False
+            self.editor.update_syntax()
+        except Exception as e:
+            self.app.notify(f"Error loading file: {e}", severity="error")
+    
+    async def save_file(self, path: Optional[str] = None) -> bool:
+        """Save editor content to file."""
+        save_path = path or self.editor.path
+        
+        if not save_path:
+            return False
+        
+        try:
+            content = "\n".join(self.editor.lines)
+            with open(save_path, "w") as f:
+                f.write(content)
+            
+            self.editor.path = save_path
+            self.editor.is_modified = False
+            self.editor.update_syntax()
+            self.app.notify(f"Saved to {save_path}")
+            return True
+        except Exception as e:
+            self.app.notify(f"Error saving file: {e}", severity="error")
+            return False
+```
+
+The `EditorContainer` class wraps an `Editor` instance and adds methods for loading and saving files.
+
+## Creating Split Views
+
+Now let's implement the ability to split the view and manage multiple editors.
+
+### Step 1: Create the Main Application Class
+
+```python
+class CodeEditorApp(App):
+    """A terminal-based code editor application."""
+    
+    CSS = """
+    CodeEditorApp {
+        background: $surface;
+        color: $text;
+    }
+    
+    Horizontal {
+        height: 1fr;
+    }
+    
+    EditorContainer {
+        width: 1fr;
+        height: 1fr;
+    }
+    
+    .status-bar {
+        dock: bottom;
+        height: 1;
+        background: $accent-darken-2;
+        color: $text;
+        padding: 0 1;
+        content-align: left middle;
+    }
+    """
+    
+    TITLE = "Terminal Code Editor"
+    SUB_TITLE = "Untitled"
+    
+    BINDINGS = [
+        Binding("ctrl+n", "new_file", "New File"),
+        Binding("ctrl+o", "open_file", "Open"),
+        Binding("ctrl+s", "save_file", "Save"),
+        Binding("ctrl+shift+s", "save_as", "Save As"),
+        Binding("ctrl+v", "split_vertical", "Split Vertical"),
+        Binding("ctrl+h", "split_horizontal", "Split Horizontal"),
+        Binding("ctrl+w", "close_editor", "Close Editor"),
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("tab", "focus_next", "Next Editor"),
+    ]
+    
+    def __init__(self, path: Optional[str] = None):
+        super().__init__()
+        self.initial_path = path
+        self.editors: Dict[str, EditorContainer] = {}
+        self.active_container_id = None
+```
+
+This sets up our main application class with keyboard bindings for all operations.
+
+### Step 2: Implement Editor Management
+
+```python
+def compose(self) -> ComposeResult:
+    """Create the UI layout."""
+    yield Header()
+    
+    with Horizontal(id="main-container"):
+        # Start with a single editor
+        editor_id = "editor-0"
+        container = EditorContainer(id=editor_id)
+        self.editors[editor_id] = container
+        self.active_container_id = editor_id
+        yield container
+    
+    yield Static("Ready", classes="status-bar", id="status-bar")
+    yield Footer()
+
+def on_mount(self) -> None:
+    """Initialize the application after UI is mounted."""
+    if self.initial_path and os.path.exists(self.initial_path):
+        self.load_file_to_editor(self.initial_path, self.active_container_id)
+
+def get_active_editor(self) -> Optional[Editor]:
+    """Get the currently active editor."""
+    if not self.active_container_id:
+        return None
+        
+    container = self.query_one(f"#{self.active_container_id}", EditorContainer)
+    return container.query_one(Editor)
+
+def get_active_container(self) -> Optional[EditorContainer]:
+    """Get the currently active editor container."""
+    if not self.active_container_id:
+        return None
+        
+    return self.query_one(f"#{self.active_container_id}", EditorContainer)
+
+def set_active_container(self, container_id: str) -> None:
+    """Set the active editor container."""
+    self.active_container_id = container_id
+    
+    # Update status bar with current file info
+    container = self.get_active_container()
+    if container:
+        editor = container.query_one(Editor)
+        path_display = editor.path if editor.path else "Untitled"
+        status = self.query_one("#status-bar", Static)
+        status.update(f"{path_display} | Line: {editor.cursor_row + 1}, Col: {editor.cursor_col + 1}")
+```
+
+These methods handle editor management, including tracking the active editor and updating the status bar.
+
+### Step 3: Implement Split View Operations
+
+```python
+def action_split_vertical(self) -> None:
+    """Split the view vertically."""
+    if not self.active_container_id:
+        return
+        
+    # Get the main container and active editor
+    main_container = self.query_one("#main-container", Horizontal)
+    active_container = self.get_active_container()
+    
+    # Create a new editor container
+    new_id = self.generate_container_id()
+    new_container = EditorContainer(id=new_id)
+    self.editors[new_id] = new_container
+    
+    # Add to main container
+    main_container.mount(new_container)
+    
+    # Focus the new editor
+    self.set_active_container(new_id)
+
+def action_split_horizontal(self) -> None:
+    """Split the view horizontally."""
+    if not self.active_container_id:
+        return
+        
+    # Get the main container and active container index
+    main_container = self.query_one("#main-container", Horizontal)
+    active_container = self.get_active_container()
+    active_index = list(self.editors.keys()).index(self.active_container_id)
+    
+    # Create a vertical container to replace the active container
+    vertical_container = Vertical()
+    
+    # Move the active container into the vertical container
+    active_container.remove()
+    vertical_container.mount(active_container)
+    
+    # Create a new editor container and add to the vertical container
+    new_id = self.generate_container_id()
+    new_container = EditorContainer(id=new_id)
+    self.editors[new_id] = new_container
+    vertical_container.mount(new_container)
+    
+    # Add the vertical container to the main container at the original position
+    main_container.mount(vertical_container)
+    
+    # Focus the new editor
+    self.set_active_container(new_id)
+```
+
+These methods implement vertical and horizontal splitting. The vertical split places editors side by side, while the horizontal split places them one above the other.
+
+## Keyboard Shortcuts
+
+Now let's implement the file operation actions that will be triggered by keyboard shortcuts:
+
+```python
+async def action_new_file(self) -> None:
+    """Create a new file in the current editor."""
+    container_id = self.active_container_id
+    if container_id:
+        container = self.get_active_container()
+        editor = container.query_one(Editor)
+        
+        # If the current editor has unsaved changes, ask to save
+        if editor.is_modified:
+            result = await self.push_screen(
+                FileDialog("Save changes?", editor.path or "", "save"),
+            )
+            if result:
+                await container.save_file(result)
+        
+        # Create new empty file in current editor
+        editor.text_content = ""
+        editor.lines = [""]
+        editor.path = None
+        editor.cursor_row = 0
+        editor.cursor_col = 0
+        editor.is_modified = False
+        editor.update_syntax()
+
+async def action_open_file(self) -> None:
+    """Open a file dialog and load the selected file."""
+    # Show file open dialog
+    result = await self.push_screen(
+        FileDialog("Open File", "", "open"),
+    )
+    
+    if result and os.path.exists(result):
+        container = self.get_active_container()
+        if container:
+            await container.load_file(result)
+
+async def action_save_file(self) -> None:
+    """Save the current file."""
+    container = self.get_active_container()
+    if not container:
+        return
+        
+    editor = container.query_one(Editor)
+    
+    # If file has no path, prompt for save location
+    if not editor.path:
+        await self.action_save_as()
+        return
+        
+    await container.save_file()
+
+async def action_save_as(self) -> None:
+    """Save the current file with a new name."""
+    container = self.get_active_container()
+    if not container:
+        return
+        
+    editor = container.query_one(Editor)
+    
+    # Show save dialog
+    result = await self.push_screen(
+        FileDialog("Save As", editor.path or "", "save"),
+    )
+    
+    if result:
+        await container.save_file(result)
+```
+
+These methods implement the standard file operations:
+- New File (Ctrl+N)
+- Open File (Ctrl+O)
+- Save File (Ctrl+S)
+- Save As (Ctrl+Shift+S)
+
+Let's also implement actions for managing editors:
+
+```python
+def action_close_editor(self) -> None:
+    """Close the current editor."""
+    if not self.active_container_id or len(self.editors) <= 1:
+        return  # Don't close the last editor
+        
+    # Get the container to close
+    container = self.get_active_container()
+    container_id = self.active_container_id
+    
+    # Remove from editors dict
+    del self.editors[container_id]
+    
+    # Find a new active editor
+    new_active_id = next(iter(self.editors.keys()))
+    self.set_active_container(new_active_id)
+    
+    # Remove the container from the UI
+    container.remove()
+
+def action_focus_next(self) -> None:
+    """Focus the next editor."""
+    if not self.active_container_id or len(self.editors) <= 1:
+        return
+        
+    # Get the list of editor ids
+    editor_ids = list(self.editors.keys())
+    current_index = editor_ids.index(self.active_container_id)
+    next_index = (current_index + 1) % len(editor_ids)
+    self.set_active_container(editor_ids[next_index])
+
+def action_quit(self) -> None:
+    """Quit the application."""
+    self.exit()
+```
+
+These methods handle editor navigation and closing:
+- Close Editor (Ctrl+W)
+- Focus Next Editor (Tab)
+- Quit (Ctrl+Q)
+
+## Putting It All Together
+
+Now we need to add a helper method to generate unique IDs for new editors, and a main function to run the application:
+
+```python
+def generate_container_id(self) -> str:
+    """Generate a unique ID for a new editor container."""
+    existing_ids = list(self.editors.keys())
+    for i in range(100):  # Reasonable upper limit
+        new_id = f"editor-{i}"
+        if new_id not in existing_ids:
+            return new_id
+    return f"editor-{len(existing_ids)}"
+
+async def load_file_to_editor(self, path: str, container_id: str) -> None:
+    """Load a file into the specified editor."""
+    container = self.query_one(f"#{container_id}", EditorContainer)
+    await container.load_file(path)
+
+def main(file_path: Optional[str] = None):
+    app = CodeEditorApp(file_path)
+    app.run()
+
+if __name__ == "__main__":
+    import sys
+    file_path = sys.argv[1] if len(sys.argv) > 1 else None
+    main(file_path)
+```
+
+## Running the Application
+
+With all the code in place, you can run the application with:
+
+```bash
+python code_editor.py [optional_file_path]
+```
+
+### Keyboard Shortcuts Summary
+
+Here's a summary of all the keyboard shortcuts:
+
+- **Ctrl+N**: Create a new file
+- **Ctrl+O**: Open a file
+- **Ctrl+S**: Save the current file
+- **Ctrl+Shift+S**: Save the current file with a new name
+- **Ctrl+V**: Split the view vertically
+- **Ctrl+H**: Split the view horizontally
+- **Ctrl+W**: Close the current editor
+- **Tab**: Switch to the next editor
+- **Ctrl+Q**: Quit the application
+
+Within the editor:
+- **Arrow keys**: Move the cursor
+- **Home/End**: Move to the start/end of the line
+- **Backspace/Delete**: Delete characters
+- **Enter**: Insert a new line with proper indentation
+- **Tab**: Insert spaces (based on tab size)
+- **Escape**: Leave the editor focus (to use app-level shortcuts)
+
+## Final Thoughts
+
+You now have a fully functional terminal-based code editor with:
+- Syntax highlighting for various languages
+- File operations (new, open, save, save as)
+- Split view editing (vertical and horizontal)
+- Keyboard shortcuts for all operations
+- No buttons, keeping the interface clean and keyboard-focused
+
+The editor is highly extensible. You could enhance it further by adding features like:
+- Find and replace functionality
+- Line numbering
+- Code folding
+- Themes and color schemes
+- Support for multiple cursors
+- Auto-completion
+- Integration with version control systems
+
+This editor demonstrates the power of Textual for creating sophisticated terminal applications. The library handles terminal rendering, event processing, and UI layout, allowing you to focus on implementing the editor's functionality.
