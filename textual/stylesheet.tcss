@@ -1,48 +1,11 @@
-Screen {
-    layout: grid;
-    grid-size: 1 3;
-    grid-rows: 1fr 1fr 1fr;
-}
-
-#editor {
-    height: 100%;
-    border: solid #680024;
-}
-
-FileDialog {
-    layout: grid;
-    grid-size: 3;
-    grid-rows: auto auto;
-    padding: 1;
-    width: 60;
-    height: 7;
-    border: heavy $accent;
+Editor {
     background: $surface;
-    content-align: center middle;
+    color: $text;
+    height: 1fr;
 }
 
-FileDialog #file_path {
-    column-span: 3;
-    width: 100%;
-    margin-bottom: 1;
-}
-
-FileDialog #cancel {
-    width: 100%;
-}
-
-FileDialog #ok {
-    width: 100%;
-}
-
-StatusBar {
-    height: 1;
+.editor--cursor {
     background: $accent;
     color: $text;
-    layout: horizontal;
-}
-
-StatusBar > Label {
-    width: 1fr;
-    padding: 0 1;
+    text-style: reverse;
 }
