@@ -5,9 +5,10 @@ from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import Screen
-from textual.widgets import Input, Static
+from textual.widgets import Footer, Header, Input, Static
+from typing import Dict, Optional
 
 
 class Editor(Static):
@@ -19,10 +20,10 @@ class Editor(Static):
             text: str="",
             language: str="python",
             tab_size: int=4,
-            path: str=None,
-            name: str=None,
-            id: str=None,
-            classes: str=None,
+            path: Optional[str]=None,
+            name: Optional[str]=None,
+            id: Optional[str]=None,
+            classes: Optional[str]=None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         self.text_content = text
@@ -156,7 +157,7 @@ class Editor(Static):
             self.insert_text(event.key)
 
 
-class FialDialog(Screen):
+class FileDialog(Screen):
     CSS_PATH = "stylesheet.tcss"
 
     BINDINGS = [
@@ -191,10 +192,10 @@ class EditorContainer(Container):
             self,
             text: str="",
             language: str="python",
-            path: str=None,
-            name: str=None,
-            id: str=None,
-            classes: str=None,
+            path: Optional[str]=None,
+            name: Optional[str]=None,
+            id: Optional[str]=None,
+            classes: Optional[str]=None,
     ) -> None:
         super().__init__(name=name, id=id, classes=classes)
         self.text = text
@@ -242,4 +243,200 @@ class EditorContainer(Container):
             return False
 
 class Cedit(App):
-    pass
+    TITLE = "cedit"
+    SUB_TITLE = "Untitled"
+
+    BINDINGS = [
+        Binding("ctrl+n", "new_file", "New File"),
+        Binding("ctrl+o", "open_file", "Open"),
+        Binding("ctrl+s", "save_file", "Save"),
+        Binding("ctrl+shift+s", "save_as", "Save As"),
+        Binding("ctrl+]", "split_vertical", "Split Vertical"),
+        Binding("ctrl+[", "split_horizontal", "Split Horizontal"),
+        Binding("ctrl+w", "close_editor", "Close Editor"),
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+\\", "focus_next", "Next Editor"),
+    ]
+
+    def __init__(self, path: Optional[str]=None):
+        super().__init__()
+        self.initial_path = path
+        self.editors: Dict[str, EditorContainer] = {}
+        self.active_container_id = None
+    
+    def compose(self) -> ComposeResult:
+        yield Header()
+
+        with Horizontal(id="main-container"):
+            editor_id = "editor-0"
+            container = EditorContainer(id=editor_id)
+            self.editors[editor_id] = container
+            self.active_container_id = editor_id
+            yield container
+        
+        yield Static("Ready", classes="status-bar", id="status-bar")
+        yield Footer()
+    
+    def on_mount(self) -> None:
+        if self.initial_path and os.path.exists(self.initial_path):
+            self.load_file_to_editor(self.initial_path, self.active_container_id)
+    
+    def get_active_container(self) -> Optional[Editor]:
+        if not self.active_container_id:
+            return None
+        
+        container = self.query_one(f"#{self.active_container_id}", EditorContainer)
+        return container.query_one(Editor)
+    
+    def set_active_container(self, container_id: str) -> None:
+        self.active_container_id = container_id
+
+        container = self.get_active_container()
+        if container:
+            editor = container.query_one(Editor)
+            path_display = editor.path if editor.path else "Untitled"
+            status = self.query_one("#status-bar", Static)
+            status.update(f"{path_display} | Line: {editor.cursor_row + 1}, Col: {editor.cursor_col + 1}")
+    
+    def action_split_vertical(self) -> None:
+        if not self.active_container_id:
+            return
+        
+        main_container = self.query_one("#main-container", Horizontal)
+        active_container = self.get_active_container()
+
+        new_id = self.generate_container_id()
+        new_container = EditorContainer(id=new_id)
+        self.editors[new_id] = new_container
+
+        main_container.main(new_container)
+
+        self.set_active_container(new_id)
+    
+    def action_split_horizontal(self) -> None:
+        if not self.active_container_id:
+            return
+        
+        main_container = self.query_one("#main-container", Horizontal)
+        active_container = self.get_active_container()
+        active_index = list(self.editors.keys()).index(self.active_container_id)
+
+        vertical_container = Vertical()
+
+        active_container.remove()
+        vertical_container.mount(active_container)
+
+        new_id = self.generate_container_id()
+        new_container = EditorContainer(id=new_id)
+        self.editors[new_id] = new_container
+        vertical_container.mount(new_container)
+
+        main_container.mount(vertical_container)
+        
+        self.set_active_container(new_id)
+    
+    async def action_new_file(self) -> None:
+        container_id = self.active_container_id
+        if container_id:
+            container = self.get_active_container()
+            editor = container.query_one(Editor)
+
+            if editor.is_modified:
+                result = await self.push_screen(
+                    FileDialog("Save changes?", editor.path or "", "save"),
+                )
+                if result:
+                    await container.save_file(result)
+            
+            editor.text_content = ""
+            editor.lines = [""]
+            editor.path = None
+            editor.cursor_row = 0
+            editor.cursor_col = 0
+            editor.is_modified = False
+            editor.update_syntax()
+    
+    async def action_open_file(self) -> None:
+        result = await self.push_screen(
+            FileDialog("Open File", "", "open"),
+        )
+
+        if result and os.path.exists(result):
+            container = self.get_active_container()
+            if container:
+                await container.load_file(result)
+    
+    async def action_save_file(self) -> None:
+        container = self.get_active_container()
+        if not container:
+            return
+        
+        editor = container.query_one(Editor)
+
+        if not editor.path:
+            await self.action_save_as()
+            return
+        
+        await container.save_file()
+    
+    async def action_save_as(self) -> None:
+        container = self.get_active_container()
+        if not container:
+            return
+        
+        editor = container.query_one(Editor)
+
+        result = await self.push_screen(
+            FileDialog("Save As", editor.path or "", "save"),
+        )
+
+        if result:
+            await container.save_file(result)
+    
+    def action_close_editor(self) -> None:
+        if not self.active_container_id or len(self.editors) <= 1:
+            return
+        
+        container = self.get_active_container()
+        container_id = self.active_container_id
+
+        del self.editors[container_id]
+
+        new_active_id = next(iter(self.editors.keys()))
+        self.set_active_container(new_active_id)
+
+        container.remove()
+    
+    def action_focus_next(self) -> None:
+        if not self.active_container_id or len(self.editors) <= 1:
+            return
+        
+        editor_ids = list(self.editors.keys())
+        current_index = editor_ids.index(self.active_container_id)
+        next_index = (current_index + 1) % len(editor_ids)
+        self.set_active_container(editor_ids[next_index])
+    
+    def action_quit(self) -> None:
+        self.exit()
+    
+    def generate_container_id(self) -> str:
+        existing_ids = list(self.editors.keys())
+        for i in range(100):
+            new_id = f"editor-{i}"
+            if new_id not in existing_ids:
+                return new_id
+        return f"editor-{len(existing_ids)}"
+
+    async def load_file_to_editor(self, path: str, container_id: str) -> None:
+        container = self.query_one(f"#{container_id}", EditorContainer)
+        await container.load_file(path)
+    
+
+def main(file_path: Optional[str]=None):
+    app = Cedit(file_path)
+    app.run()
+
+if __name__ == "__main__":
+    import sys
+    file_path = sys.argv[1] if len(sys.argv) > 1 else None
+    main(file_path)
