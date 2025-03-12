@@ -9,3 +9,51 @@ Editor {
     color: $text;
     text-style: reverse;
 }
+
+FileDialog {
+    align: center middle;
+    background: $surface;
+    color: $text;
+}
+
+#dialog-container {
+    width: 60%;
+    height: auto;
+    border: heavy $accent;
+    background: $surface;
+    padding: 1 2;
+}
+
+#dialog-title {
+    content-align: center middle;
+    width: 100%;
+    padding-bottom: 1;
+}
+
+#file-path {
+    width: 100%;
+    margin-bottom: 1;
+}
+
+Cedit {
+    background: $surface;
+    color: $text;
+}
+
+Horizontal {
+    height: 1fr;
+}
+
+EditorContainer {
+    width: 1fr;
+    height: 1fr;
+}
+
+.status-bar {
+    dock: bottom;
+    height: 1;
+    background: $accent-darken-2;
+    color: $text;
+    padding: 0 1;
+    content-align: left middle;
+}

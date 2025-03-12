@@ -4,7 +4,10 @@ from rich.syntax import Syntax
 from rich.text import Text
 from textual import events
 from textual.app import App, ComposeResult
-from textual.widgets import Static
+from textual.binding import Binding
+from textual.containers import Container
+from textual.screen import Screen
+from textual.widgets import Input, Static
 
 
 class Editor(Static):
@@ -127,4 +130,116 @@ class Editor(Static):
             self.screen.focus_next()
             return
         
-        
+        if event.key == "up":
+            self.move_cursor(rows=-1)
+        elif event.key == "down":
+            self.move_cursor(rows=1)
+        elif event.key == "left":
+            self.move_cursor(cols=-1)
+        elif event.key == "right":
+            self.move_cursor(cols=1)
+        elif event.key == "home":
+            self.cursor_col = 0
+            self.update_syntax()
+        elif event.key == "end":
+            self.cursor_col = len(self.lines[self.cursor_row])
+            self.update_syntax()
+        elif event.key == "enter":
+            self.handle_enter()
+        elif event.key == "backspace":
+            self.delete_character()
+        elif event.key == "delete":
+            if self.cursor_col < len(self.lines[self.cursor_row]):
+                self.move_cursor(cols=1)
+                self.delete_character()
+        elif len(event.key) == 1 or event.key == "tab":
+            self.insert_text(event.key)
+
+
+class FialDialog(Screen):
+    CSS_PATH = "stylesheet.tcss"
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "confirm", "Confirm"),
+    ]
+
+    def __init__(self, title: str, default_path: str="", action: str="open"):
+        super().__init__()
+        self.title = title
+        self.default_path = default_path
+        self.action = action
+    
+    def compose(self) -> ComposeResult:
+        with Container(id="dialog-container"):
+            yield Static(self.title, id="dialog-title")
+            yield Input(value=self.default_path, placeholder="Enter file path ... ", id="file-path")
+    
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+    
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+    
+    def action_confirm(self) -> None:
+        file_path = self.query_one("#file-path").value
+        self.dismiss(file_path)
+
+
+class EditorContainer(Container):
+    def __init__(
+            self,
+            text: str="",
+            language: str="python",
+            path: str=None,
+            name: str=None,
+            id: str=None,
+            classes: str=None,
+    ) -> None:
+        super().__init__(name=name, id=id, classes=classes)
+        self.text = text
+        self.language = language
+        self.path = path
+
+    def compose(self) -> ComposeResult:
+        yield Editor(self.text, self.language, path=self.path)
+    
+    def on_mount(self) -> None:
+        self.editor = self.query_one(Editor)
+    
+    async def load_file(self, path: str) -> None:
+        try:
+            with open(path, "r") as f:
+                content = f.read()
+            
+            self.editor.text_content = content
+            self.editor.lines = content.splitlines() or [""]
+            self.editor.path = path
+            self.editor.cursor_row = 0
+            self.editor.cursor_col = 0
+            self.editor.is_modified = False
+            self.editor.update_syntax()
+        except Exception as e:
+            self.app.notify(f"Error loading file: {e}", severity="error")
+    
+    async def save_file(self, path: str=None) -> bool:
+        save_path = path or self.editor.path
+        if not save_path:
+            return False
+
+        try:
+            content = "\n".join(self.editor.lines)
+            with open(save_path, "w") as f:
+                f.write(content)
+            
+            self.editor.path = save_path
+            self.editor.is_modified = False
+            self.editor.update_syntax()
+            self.app.notify(f"Saved to {save_path}")
+            return True
+        except Exception as e:
+            self.app.notify(f"Error saving file: {e}", severity="error")
+            return False
+
+class Cedit(App):
+    pass
